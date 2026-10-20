@@ -32,6 +32,7 @@ export default function VoiceAssistantPage() {
     // Voice synthesis
     isSpeaking,
     isMuted,
+    speak,
     stopSpeaking,
     repeatLastSpeech,
     toggleMute,
@@ -137,7 +138,7 @@ export default function VoiceAssistantPage() {
       <section className="glass-panel rounded-3xl overflow-hidden shadow-2xl mb-4 border border-slate-800 flex-1 flex flex-col justify-between">
         <ConversationHistory
           messages={messages}
-          onSpeakMessage={stopSpeaking ? (txt) => { stopSpeaking(); } : undefined}
+          onSpeakMessage={(text) => speak(text)}
           onSelectPrompt={(prompt) => sendMessage(prompt)}
           currentLanguage={currentLanguage}
         />

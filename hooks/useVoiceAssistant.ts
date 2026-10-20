@@ -270,6 +270,14 @@ export function useVoiceAssistant() {
     }
   }, [isListening, isSpeaking, pendingAction]);
 
+  const speakMessage = useCallback(
+    (text: string) => {
+      stopRecognition();
+      speak(text);
+    },
+    [stopRecognition, speak]
+  );
+
   return {
     currentLanguage,
     changeLanguage,
@@ -292,6 +300,7 @@ export function useVoiceAssistant() {
     isSpeaking,
     isMuted,
     isTtsSupported,
+    speak: speakMessage,
     stopSpeaking,
     repeatLastSpeech,
     toggleMute,
