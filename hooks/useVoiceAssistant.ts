@@ -41,6 +41,7 @@ export function useVoiceAssistant() {
     stop: stopSpeaking,
     repeat: repeatLastSpeech,
     toggleMute,
+    unlockAudio,
     isSpeaking,
     isMuted,
     isSupported: isTtsSupported,
@@ -60,6 +61,7 @@ export function useVoiceAssistant() {
     async (text: string) => {
       if (!text.trim()) return;
 
+      unlockAudio();
       setApiError(null);
       stopSpeaking();
 
@@ -195,6 +197,7 @@ export function useVoiceAssistant() {
 
   // Toggle listening button
   const toggleListening = useCallback(() => {
+    unlockAudio();
     if (isListening) {
       stopRecognition();
       setAssistantState('idle');
@@ -203,7 +206,7 @@ export function useVoiceAssistant() {
       startRecognition();
       setAssistantState('listening');
     }
-  }, [isListening, startRecognition, stopRecognition, stopSpeaking]);
+  }, [isListening, startRecognition, stopRecognition, stopSpeaking, unlockAudio]);
 
   // Handle action confirmation dialog response
   const handleConfirmPendingAction = useCallback(

@@ -76,54 +76,116 @@ export function useSpeechSynthesis({
     setState((prev) => ({ ...prev, isSpeaking: false }));
   }, []);
 
-  // Speak text
+  // Unlock audio context / resume synthesis on user interaction
+  const unlockAudio = useCallback(() => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    try {
+      if (window.speechSynthesis.paused) {
+        window.speechSynthesis.resume();
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // Speak text with robust cross-browser handling
   const speak = useCallback(
     (text: string) => {
       if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
-        setState((prev) => ({ ...prev, error: 'Speech synthesis is not supported on this device.' }));
+        setState((prev) => ({ ...prev, error: 'Speech synthesis is not supported in this browser.' }));
         return;
       }
 
       if (!text || state.isMuted) return;
 
-      // Prevent overlapping playback
-      window.speechSynthesis.cancel();
-
       try {
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = language;
-
-        // Apply matching voice if available
-        if (state.selectedVoice) {
-          utterance.voice = state.selectedVoice;
+        // 1. Resume synthesis if browser paused it (very common Chrome/Safari quirk)
+        if (window.speechSynthesis.paused) {
+          window.speechSynthesis.resume();
         }
 
-        utterance.rate = 1.0;
-        utterance.pitch = 1.0;
+        // 2. Clear any pending speech
+        window.speechSynthesis.cancel();
 
-        utterance.onstart = () => {
-          setState((prev) => ({ ...prev, isSpeaking: true, error: null }));
-        };
+        // 3. Small delay to prevent Chrome cancel-after-speak race condition
+        setTimeout(() => {
+          try {
+            const availableVoices = window.speechSynthesis.getVoices();
+            const langPrefix = language.split('-')[0].toLowerCase();
 
-        utterance.onend = () => {
-          currentUtteranceRef.current = null;
-          setState((prev) => ({ ...prev, isSpeaking: false }));
-          onEnd?.();
-        };
+            // Intelligent voice matching
+            let matchedVoice =
+              state.selectedVoice ||
+              availableVoices.find((v) => v.lang.toLowerCase() === language.toLowerCase()) ||
+              availableVoices.find((v) => v.lang.toLowerCase().replace('_', '-').startsWith(langPrefix)) ||
+              availableVoices.find((v) => v.lang.toLowerCase().startsWith('en-in') || v.lang.toLowerCase().startsWith('hi')) ||
+              availableVoices.find((v) => v.default) ||
+              availableVoices[0] ||
+              null;
 
-        utterance.onerror = (event: any) => {
-          if (event.error === 'interrupted' || event.error === 'canceled') {
-            setState((prev) => ({ ...prev, isSpeaking: false }));
-            return;
+            const utterance = new SpeechSynthesisUtterance(text);
+
+            if (matchedVoice) {
+              utterance.voice = matchedVoice;
+              // If voice matches the target language, use the target language; otherwise use the voice's native language to prevent browser speech errors
+              utterance.lang = matchedVoice.lang.toLowerCase().startsWith(langPrefix)
+                ? language
+                : matchedVoice.lang;
+            } else {
+              utterance.lang = language;
+            }
+
+            utterance.rate = 1.0;
+            utterance.pitch = 1.0;
+
+            utterance.onstart = () => {
+              setState((prev) => ({ ...prev, isSpeaking: true, error: null }));
+            };
+
+            utterance.onend = () => {
+              (window as any).__activeSpeechUtterance = null;
+              currentUtteranceRef.current = null;
+              setState((prev) => ({ ...prev, isSpeaking: false }));
+              onEnd?.();
+            };
+
+            utterance.onerror = (event: any) => {
+              (window as any).__activeSpeechUtterance = null;
+              currentUtteranceRef.current = null;
+              
+              if (event.error === 'interrupted' || event.error === 'canceled') {
+                setState((prev) => ({ ...prev, isSpeaking: false }));
+                return;
+              }
+
+              // Helpful browser-specific error messaging
+              let errorMsg = `Speech playback failed (${event.error || 'unknown'}).`;
+              if (event.error === 'not-allowed') {
+                errorMsg = 'Audio blocked by browser. Please tap the screen to enable audio playback.';
+              } else if (event.error === 'language-unavailable') {
+                errorMsg = 'Your device lacks a voice for this language. Playing with default voice.';
+              }
+
+              setState((prev) => ({ ...prev, isSpeaking: false, error: errorMsg }));
+              onError?.(errorMsg);
+            };
+
+            // Prevent garbage collection in Chrome during speech
+            (window as any).__activeSpeechUtterance = utterance;
+            currentUtteranceRef.current = utterance;
+            lastSpokenTextRef.current = text;
+
+            // Chrome paused check before speaking
+            if (window.speechSynthesis.paused) {
+              window.speechSynthesis.resume();
+            }
+
+            window.speechSynthesis.speak(utterance);
+          } catch (innerErr: any) {
+            console.warn('Speech synthesis inner error:', innerErr);
+            setState((prev) => ({ ...prev, isSpeaking: false, error: 'Could not initialize speech synthesis utterance.' }));
           }
-          const errorMsg = `Speech playback failed (${event.error || 'unknown'}).`;
-          setState((prev) => ({ ...prev, isSpeaking: false, error: errorMsg }));
-          onError?.(errorMsg);
-        };
-
-        currentUtteranceRef.current = utterance;
-        lastSpokenTextRef.current = text;
-        window.speechSynthesis.speak(utterance);
+        }, 50);
       } catch (err: any) {
         setState((prev) => ({ ...prev, isSpeaking: false, error: 'Failed to play synthesized speech.' }));
       }
@@ -155,6 +217,7 @@ export function useSpeechSynthesis({
     stop,
     repeat,
     toggleMute,
+    unlockAudio,
     lastSpokenText: lastSpokenTextRef.current,
   };
 }
